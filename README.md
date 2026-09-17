@@ -79,10 +79,6 @@ CIRA/
 
 ---
 
-## 👥 Hackathon Team & System Map
-
-CIRA was built entirely in **4 days** by a cross-functional squad of **4 engineers**. The repository mapping mirrors our core sprint tracks:
-
 ### 🧠 1. AI Integration Track
 *   **Files:** `backend/lambda/ai_extraction/`, `backend/services/bedrock_service.py`
 *   **Mission:** Handle prompt engineering and orchestrate **AWS Bedrock JSON mode** to parse chaotic unstructured user reports into strictly typed systemic schemas.
