@@ -1,4 +1,4 @@
-# SentinelX / CampusPulse — Member 2 Backend
+# CIRA — Member 2 Backend
 
 Deterministic fusion + priority backend for turning multiple student
 reports into a single actionable incident.
