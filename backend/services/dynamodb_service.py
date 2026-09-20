@@ -11,7 +11,8 @@ credentials from the Lambda execution role / local AWS config).
 import os
 import boto3
 from botocore.exceptions import ClientError
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from models.report import Report
 from models.incident import Incident
@@ -21,6 +22,10 @@ from models.incident import Incident
 # ---------------------------------------------------------------------------
 REPORTS_TABLE_NAME = os.environ.get("REPORTS_TABLE_NAME", "sentinelx-reports")
 INCIDENTS_TABLE_NAME = os.environ.get("INCIDENTS_TABLE_NAME", "sentinelx-incidents")
+TIMELINE_TABLE_NAME = os.environ.get(
+    "TIMELINE_TABLE_NAME",
+    "cira-incident-timeline"
+)
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 # Lazily-created singletons so tests can monkeypatch / avoid AWS calls
@@ -41,6 +46,9 @@ def _reports_table():
 
 def _incidents_table():
     return _get_resource().Table(INCIDENTS_TABLE_NAME)
+
+def _timeline_table():
+    return _get_resource().Table(TIMELINE_TABLE_NAME)
 
 
 class DynamoDBServiceError(Exception):
@@ -123,3 +131,30 @@ def update_incident(incident: Incident) -> Incident:
         return incident
     except ClientError as e:
         raise DynamoDBServiceError(f"Failed to update incident {incident.incident_id}: {e}") from e
+
+
+
+def log_incident_event(
+    incident_id: str,
+    event_type: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> dict:
+    """Persist an event in the incident timeline."""
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    item = {
+        "incident_id": incident_id,
+        "timestamp": timestamp,
+        "event_type": event_type,
+        "details": details or {},
+        "created_at": timestamp,
+    }
+
+    try:
+        _timeline_table().put_item(Item=item)
+        return item
+    except ClientError as e:
+        raise DynamoDBServiceError(
+            f"Failed to log incident event for {incident_id}: {e}"
+        ) from e
