@@ -9,11 +9,46 @@ Parameters:
     Default: ""
     Description: Optional email address for SNS notifications
 
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 256
+
 Resources:
+
+  # --------------------------------------------------
+  # HTTP API (single entry point for the frontend)
+  # --------------------------------------------------
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+          - PATCH
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
 
   # --------------------------------------------------
   # DynamoDB
   # --------------------------------------------------
+  ReportsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: sentinelx-reports
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: report_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: report_id
+          KeyType: HASH
+
   IncidentTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -77,6 +112,98 @@ Resources:
       Endpoint: !Ref NotificationEmail
 
   # --------------------------------------------------
+  # Reports Lambda  (POST /reports -> ingest, fuse/create, prioritize)
+  # --------------------------------------------------
+
+  ReportsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: lambda/reports/handler.handler
+      Environment:
+        Variables:
+          REPORTS_TABLE_NAME: !Ref ReportsTable
+          INCIDENTS_TABLE_NAME: !Ref IncidentTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReportsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentTable
+      Events:
+        PostReports:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /reports
+            Method: post
+
+  # --------------------------------------------------
+  # Incidents Lambda  (GET/PATCH /incidents)
+  # --------------------------------------------------
+
+  IncidentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: lambda/incidents/handler.handler
+      Environment:
+        Variables:
+          INCIDENTS_TABLE_NAME: !Ref IncidentTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentTable
+      Events:
+        GetIncidents:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /incidents
+            Method: get
+        GetIncident:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /incidents/{incident_id}
+            Method: get
+        PatchIncident:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /incidents/{incident_id}
+            Method: patch
+
+  # --------------------------------------------------
+  # AI Extraction Lambda  (POST /reports/extract -> Bedrock)
+  # Commented out for now: nothing in the frontend calls this route yet,
+  # and it needs Bedrock model access enabled. Uncomment once someone
+  # wires the frontend to call /reports/extract and Bedrock access is on.
+  # --------------------------------------------------
+
+  # AiExtractionFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     CodeUri: ../backend/
+  #     Handler: lambda/ai_extraction/handler.handler
+  #     Timeout: 30
+  #     Environment:
+  #       Variables:
+  #         AI_PROVIDER: bedrock
+  #         BEDROCK_MODEL_ID: anthropic.claude-3-haiku-20240307-v1:0
+  #     Policies:
+  #       - Statement:
+  #           - Effect: Allow
+  #             Action:
+  #               - bedrock:InvokeModel
+  #             Resource: "*"
+  #     Events:
+  #       PostExtract:
+  #         Type: HttpApi
+  #         Properties:
+  #           ApiId: !Ref HttpApi
+  #           Path: /reports/extract
+  #           Method: post
+
+  # --------------------------------------------------
   # Routing Lambda
   # --------------------------------------------------
 
@@ -85,8 +212,6 @@ Resources:
     Properties:
       CodeUri: ../backend/
       Handler: lambda/routing/handler.handler
-      Runtime: python3.12
-      Timeout: 10
 
   # --------------------------------------------------
   # Timeline Lambda
@@ -97,8 +222,6 @@ Resources:
     Properties:
       CodeUri: ../backend/
       Handler: lambda/timeline/handler.handler
-      Runtime: python3.12
-      Timeout: 10
       Environment:
         Variables:
           TIMELINE_TABLE_NAME: !Ref IncidentTimelineTable
@@ -115,8 +238,6 @@ Resources:
     Properties:
       CodeUri: ../backend/
       Handler: lambda/notifications/handler.handler
-      Runtime: python3.12
-      Timeout: 10
       Environment:
         Variables:
           CRITICAL_TOPIC_ARN: !Ref CampusCriticalAlerts
@@ -136,8 +257,6 @@ Resources:
     Properties:
       CodeUri: ../backend/
       Handler: lambda/acknowledgement/handler.handler
-      Runtime: python3.12
-      Timeout: 10
 
   # --------------------------------------------------
   # Workflow Status Lambda
@@ -148,14 +267,12 @@ Resources:
     Properties:
       CodeUri: ../backend/
       Handler: lambda/incidents/workflow_status.handler
-      Runtime: python3.12
-      Timeout: 10
       Environment:
         Variables:
-          INCIDENTS_TABLE_NAME: sentinelx-incidents
+          INCIDENTS_TABLE_NAME: !Ref IncidentTable
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: sentinelx-incidents
+            TableName: !Ref IncidentTable
 
   # --------------------------------------------------
   # Step Functions
@@ -193,6 +310,18 @@ Conditions:
       - ""
 
 Outputs:
+
+  ApiUrl:
+    Description: Base URL for the HTTP API (frontend VITE_API_URL)
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+  ReportsTableName:
+    Description: DynamoDB reports table
+    Value: !Ref ReportsTable
+
+  IncidentsTableName:
+    Description: DynamoDB incidents table
+    Value: !Ref IncidentTable
 
   TimelineTableName:
     Description: DynamoDB incident timeline table

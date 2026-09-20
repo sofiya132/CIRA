@@ -16,6 +16,7 @@ import os
 import sys
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -34,7 +35,7 @@ def _response(status_code: int, body: dict) -> dict:
             "Access-Control-Allow-Headers": "Content-Type",
             "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
         },
-        "body": json.dumps(body),
+          "body": json.dumps(body, default=_json_default),
     }
 
 
@@ -148,7 +149,21 @@ def handler(event, context):
             "report_count": new_incident.report_count,
         })
 
+    
+
     except dynamodb_service.DynamoDBServiceError as e:
         return _response(500, {"success": False, "error": str(e)})
     except Exception as e:  # noqa: BLE001 - last-resort guard for a Lambda handler
         return _response(500, {"success": False, "error": f"Unexpected server error: {e}"})
+
+def _json_default(obj):
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+def _response(status_code: int, body: dict) -> dict:
+    return {
+        "statusCode": status_code,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(body, default=_json_default),   # <- default added
+    }

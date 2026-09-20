@@ -54,7 +54,7 @@ class Incident:
             updated_at=data.get("updated_at"),
             status=data.get("status", "NEW"),
             summary=data.get("summary"),
-            report_count=data.get("report_count", 0),
+            report_count=int(data.get("report_count", 0) or 0),
             report_ids=data.get("report_ids", []) or [],
             assigned_responder=data.get("assigned_responder"),
         )
