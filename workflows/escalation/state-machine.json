@@ -1,0 +1,139 @@
+{
+  "Comment": "CIRA Incident Response and Escalation Workflow",
+  "StartAt": "AssignResponder",
+  "States": {
+    "AssignResponder": {
+      "Type": "Task",
+      "Resource": "${ROUTING_LAMBDA_ARN}",
+      "ResultPath": "$.assignment",
+      "Next": "LogResponderAssigned"
+    },
+
+    "LogResponderAssigned": {
+      "Type": "Task",
+      "Resource": "${TIMELINE_LAMBDA_ARN}",
+      "Parameters": {
+        "incident_id.$": "$.incident_id",
+        "event_type": "RESPONDER_ASSIGNED",
+        "details": {
+          "responder_id.$": "$.assignment.responder_id",
+          "responder_group.$": "$.assignment.responder_group"
+        }
+      },
+      "ResultPath": "$.timeline_assignment",
+      "Next": "NotifyResponder"
+    },
+
+    "NotifyResponder": {
+      "Type": "Task",
+      "Resource": "${SNS_NOTIFY_LAMBDA_ARN}",
+      "Parameters": {
+        "incident_id.$": "$.incident_id",
+        "message.$": "$.message",
+        "notification_type": "CRITICAL"
+      },
+      "ResultPath": "$.notification",
+      "Next": "LogResponderNotified"
+    },
+
+    "LogResponderNotified": {
+      "Type": "Task",
+      "Resource": "${TIMELINE_LAMBDA_ARN}",
+      "Parameters": {
+        "incident_id.$": "$.incident_id",
+        "event_type": "RESPONDER_NOTIFIED"
+      },
+      "ResultPath": "$.timeline_notification",
+      "Next": "WaitForAcknowledgement"
+    },
+
+    "WaitForAcknowledgement": {
+      "Type": "Wait",
+      "SecondsPath": "$.assignment.ack_timeout_seconds",
+      "Next": "CheckAcknowledgement"
+    },
+
+    "CheckAcknowledgement": {
+      "Type": "Task",
+      "Resource": "${CHECK_ACK_LAMBDA_ARN}",
+      "Parameters": {
+        "incident_id.$": "$.incident_id",
+        "acknowledged.$": "$.acknowledged"
+      },
+      "ResultPath": "$.acknowledgement",
+      "Next": "AcknowledgementChoice"
+    },
+
+    "AcknowledgementChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.acknowledgement.acknowledged",
+          "BooleanEquals": true,
+          "Next": "LogAcknowledged"
+        }
+      ],
+      "Default": "LogAcknowledgementTimeout"
+    },
+
+    "LogAcknowledged": {
+      "Type": "Task",
+      "Resource": "${TIMELINE_LAMBDA_ARN}",
+      "Parameters": {
+        "incident_id.$": "$.incident_id",
+        "event_type": "RESPONDER_ACKNOWLEDGED"
+      },
+      "ResultPath": "$.timeline_acknowledged",
+      "Next": "UpdateIncidentActive"
+    },
+
+    "UpdateIncidentActive": {
+      "Type": "Task",
+      "Resource": "${WORKFLOW_STATUS_LAMBDA_ARN}",
+      "Parameters": {
+        "incident_id.$": "$.incident_id",
+        "status": "ACTIVE"
+      },
+      "ResultPath": "$.incident_status",
+      "Next": "WorkflowCompleted"
+    },
+
+    "LogAcknowledgementTimeout": {
+      "Type": "Task",
+      "Resource": "${TIMELINE_LAMBDA_ARN}",
+      "Parameters": {
+        "incident_id.$": "$.incident_id",
+        "event_type": "ACKNOWLEDGEMENT_TIMEOUT"
+      },
+      "ResultPath": "$.timeline_timeout",
+      "Next": "EscalateIncident"
+    },
+
+    "EscalateIncident": {
+      "Type": "Task",
+      "Resource": "${SNS_NOTIFY_LAMBDA_ARN}",
+      "Parameters": {
+        "incident_id.$": "$.incident_id",
+        "message": "Incident requires escalation because the assigned responder did not acknowledge within the required time.",
+        "notification_type": "ESCALATION"
+      },
+      "ResultPath": "$.escalation",
+      "Next": "LogEscalated"
+    },
+
+    "LogEscalated": {
+      "Type": "Task",
+      "Resource": "${TIMELINE_LAMBDA_ARN}",
+      "Parameters": {
+        "incident_id.$": "$.incident_id",
+        "event_type": "INCIDENT_ESCALATED"
+      },
+      "ResultPath": "$.timeline_escalated",
+      "Next": "WorkflowCompleted"
+    },
+
+    "WorkflowCompleted": {
+      "Type": "Succeed"
+    }
+  }
+}

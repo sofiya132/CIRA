@@ -1,0 +1,211 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: CIRA serverless incident response infrastructure
+
+Parameters:
+  NotificationEmail:
+    Type: String
+    Default: ""
+    Description: Optional email address for SNS notifications
+
+Resources:
+
+  # --------------------------------------------------
+  # DynamoDB
+  # --------------------------------------------------
+  IncidentTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: sentinelx-incidents
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: incident_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: incident_id
+          KeyType: HASH
+
+  IncidentTimelineTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: cira-incident-timeline
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: incident_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: incident_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+
+  # --------------------------------------------------
+  # SNS Topics
+  # --------------------------------------------------
+
+  CampusCriticalAlerts:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: cira-critical-alerts
+
+  CampusEscalations:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: cira-escalations
+
+  # --------------------------------------------------
+  # SNS Email Subscription
+  # --------------------------------------------------
+
+  CriticalAlertSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasNotificationEmail
+    Properties:
+      TopicArn: !Ref CampusCriticalAlerts
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+
+  EscalationSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasNotificationEmail
+    Properties:
+      TopicArn: !Ref CampusEscalations
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+
+  # --------------------------------------------------
+  # Routing Lambda
+  # --------------------------------------------------
+
+  RoutingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: lambda/routing/handler.handler
+      Runtime: python3.12
+      Timeout: 10
+
+  # --------------------------------------------------
+  # Timeline Lambda
+  # --------------------------------------------------
+
+  TimelineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: lambda/timeline/handler.handler
+      Runtime: python3.12
+      Timeout: 10
+      Environment:
+        Variables:
+          TIMELINE_TABLE_NAME: !Ref IncidentTimelineTable
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref IncidentTimelineTable
+
+  # --------------------------------------------------
+  # Notification Lambda
+  # --------------------------------------------------
+
+  NotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: lambda/notifications/handler.handler
+      Runtime: python3.12
+      Timeout: 10
+      Environment:
+        Variables:
+          CRITICAL_TOPIC_ARN: !Ref CampusCriticalAlerts
+          ESCALATION_TOPIC_ARN: !Ref CampusEscalations
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt CampusCriticalAlerts.TopicName
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt CampusEscalations.TopicName
+
+  # --------------------------------------------------
+  # Acknowledgement Lambda
+  # --------------------------------------------------
+
+  AcknowledgementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: lambda/acknowledgement/handler.handler
+      Runtime: python3.12
+      Timeout: 10
+
+  # --------------------------------------------------
+  # Workflow Status Lambda
+  # --------------------------------------------------
+
+  WorkflowStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: lambda/incidents/workflow_status.handler
+      Runtime: python3.12
+      Timeout: 10
+      Environment:
+        Variables:
+          INCIDENTS_TABLE_NAME: sentinelx-incidents
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: sentinelx-incidents
+
+  # --------------------------------------------------
+  # Step Functions
+  # --------------------------------------------------
+
+  IncidentEscalationStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: CIRA-Incident-Escalation
+      DefinitionUri: ../workflows/escalation/state-machine.json
+
+      DefinitionSubstitutions:
+        ROUTING_LAMBDA_ARN: !GetAtt RoutingFunction.Arn
+        TIMELINE_LAMBDA_ARN: !GetAtt TimelineFunction.Arn
+        SNS_NOTIFY_LAMBDA_ARN: !GetAtt NotificationFunction.Arn
+        CHECK_ACK_LAMBDA_ARN: !GetAtt AcknowledgementFunction.Arn
+        WORKFLOW_STATUS_LAMBDA_ARN: !GetAtt WorkflowStatusFunction.Arn
+
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref RoutingFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref TimelineFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref NotificationFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AcknowledgementFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref WorkflowStatusFunction
+
+Conditions:
+  HasNotificationEmail: !Not
+    - !Equals
+      - !Ref NotificationEmail
+      - ""
+
+Outputs:
+
+  TimelineTableName:
+    Description: DynamoDB incident timeline table
+    Value: !Ref IncidentTimelineTable
+
+  CriticalAlertsTopicArn:
+    Description: SNS critical alerts topic
+    Value: !Ref CampusCriticalAlerts
+
+  EscalationsTopicArn:
+    Description: SNS escalation topic
+    Value: !Ref CampusEscalations
+
+  StateMachineArn:
+    Description: CIRA Step Functions state machine
+    Value: !Ref IncidentEscalationStateMachine
