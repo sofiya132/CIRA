@@ -25,11 +25,15 @@ from services import dynamodb_service
 from services.fusion_engine import find_matching_incident, FUSION_THRESHOLD
 from services.priority_engine import calculate_priority
 
-
 def _response(status_code: int, body: dict) -> dict:
     return {
         "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
+        },
         "body": json.dumps(body),
     }
 

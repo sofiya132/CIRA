@@ -111,7 +111,10 @@ def get_active_incidents() -> List[Incident]:
             scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
         incidents = [Incident.from_dict(item) for item in items]
-        return [inc for inc in incidents if inc.status in ("NEW", "ACTIVE")]
+        return [
+    inc for inc in incidents
+    if inc.status not in ("RESOLVED", "CLOSED")
+]
     except ClientError as e:
         raise DynamoDBServiceError(f"Failed to get active incidents: {e}") from e
 

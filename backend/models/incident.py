@@ -11,7 +11,16 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Optional
 
 
-VALID_STATUSES = {"NEW", "ACTIVE", "RESOLVED", "CLOSED"}
+VALID_STATUSES = {
+    "NEW",
+    "AWAITING_ACK",
+    "ACKNOWLEDGED",
+    "EN_ROUTE",
+    "ON_SCENE",
+    "ESCALATED",
+    "RESOLVED",
+    "CLOSED",
+}
 VALID_PRIORITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
 
