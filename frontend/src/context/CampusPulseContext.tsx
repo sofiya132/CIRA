@@ -22,6 +22,7 @@ import {
 } from '../services/mockData';
 import { findMatchingIncident } from '../services/fusionEngine';
 import { calculatePriority } from '../services/priorityEngine';
+import { submitReport as submitReportToApi } from '../services/api';
 
 interface SubmitReportInput {
   text: string;
@@ -364,6 +365,15 @@ export const CampusPulseProvider: React.FC<{ children: ReactNode }> = ({ childre
       isAnonymous: input.isAnonymous,
       evidencePhotos: input.evidencePhotos || []
     };
+
+    // Fire the real backend call in the background — doesn't block or
+    // change the local UI simulation, just proves the AWS integration works.
+    submitReportToApi({
+      text: input.text,
+      location: input.location,
+      category: input.category,
+      person_state: input.personState,
+    }).catch(err => console.error('Backend submitReport failed:', err));
 
     // Evaluate fusion against active incidents
     const { matchedIncident, scoreResult } = findMatchingIncident(newReport, incidents);
